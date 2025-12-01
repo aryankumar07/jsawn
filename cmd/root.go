@@ -1,5 +1,5 @@
 /*
-Copyright © 2025 NAME HERE <EMAIL ADDRESS>
+Copyright © 2025 Aryan Kumar aryan.pageme@gmail.com
 */
 package cmd
 
@@ -9,6 +9,8 @@ import (
 	"os"
 
 	"github.com/aryankumar07/jsawn/jsonFormatter"
+	"github.com/aryankumar07/jsawn/viewPage"
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/spf13/cobra"
 )
 
@@ -25,18 +27,22 @@ func runJsonFormatter(cmd *cobra.Command, args []string) {
 	if err != nil {
 		log.Fatalf("failed to check stdin: %v", err)
 	}
-
 	if (stat.Mode() & os.ModeCharDevice) == 0 {
 		jsonData, err := jsonFormatter.GetJsonDataFromPipe()
 		if err != nil {
 			log.Fatalln(err)
 		}
-		fmt.Println(*jsonData)
-		return
+		m := viewPage.InitModel(*jsonData)
+		p := tea.NewProgram(
+			m,
+			tea.WithAltScreen(),
+			tea.WithMouseCellMotion(),
+		)
+		if _, err := p.Run(); err != nil {
+			fmt.Println("could not run program:", err)
+			os.Exit(1)
+		}
 	}
-
-	fmt.Println("No JSON input detected. Use:")
-	fmt.Println("  curl https://dummyjson.com/products | jsawn")
 }
 
 func Execute() {
