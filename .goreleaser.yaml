@@ -73,24 +73,24 @@ brews:
       bin.install "jsawn"
 
 # Arch Linux (AUR)
-aurs:
-  - name: jsawn-bin
-    homepage: "https://github.com/aryankumar07/jsawn"
-    description: "Fast JSON parser and query tool"
-    maintainers:
-      - 'Aryan Kumar ak2839426@gmail.com'
-    license: "MIT"
-    private_key: "{{ .Env.AUR_SSH_KEY }}"
-    git_url: 'ssh://aur@aur.archlinux.org/jsawn-bin.git'
-    package: |-
-      # bin
-      install -Dm755 "./jsawn" "${pkgdir}/usr/bin/jsawn"
-      
-      # license
-      install -Dm644 "./LICENSE" "${pkgdir}/usr/share/licenses/jsawn/LICENSE"
-    commit_author:
-      name: Aryan Kumar
-      email: ak2839426@gmail.com 
+# aurs:
+#   - name: jsawn-bin
+#     homepage: "https://github.com/aryankumar07/jsawn"
+#     description: "Fast JSON parser and query tool"
+#     maintainers:
+#       - 'Aryan Kumar ak2839426@gmail.com'
+#     license: "MIT"
+#     private_key: "{{ .Env.AUR_SSH_KEY }}"
+#     git_url: 'ssh://aur@aur.archlinux.org/jsawn-bin.git'
+#     package: |-
+#       # bin
+#       install -Dm755 "./jsawn" "${pkgdir}/usr/bin/jsawn"
+#
+#       # license
+#       install -Dm644 "./LICENSE" "${pkgdir}/usr/share/licenses/jsawn/LICENSE"
+#     commit_author:
+#       name: Aryan Kumar
+#       email: ak2839426@gmail.com 
 
 # GitHub Release
 release:
