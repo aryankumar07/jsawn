@@ -1,0 +1,124 @@
+version: 2
+
+before:
+  hooks:
+    - go mod tidy
+    - go generate ./...
+
+builds:
+  - env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+      - arm
+    goarm:
+      - "6"
+      - "7"
+    ignore:
+      - goos: windows
+        goarch: arm
+    ldflags:
+      - -s -w -X main.version={{.Version}} -X main.commit={{.Commit}} -X main.date={{.Date}}
+
+archives:
+  - format: tar.gz
+    name_template: >-
+      {{ .ProjectName }}_
+      {{- title .Os }}_
+      {{- if eq .Arch "amd64" }}x86_64
+      {{- else if eq .Arch "386" }}i386
+      {{- else }}{{ .Arch }}{{ end }}
+      {{- if .Arm }}v{{ .Arm }}{{ end }}
+    format_overrides:
+      - goos: windows
+        format: zip
+    files:
+      - README.md
+      - LICENSE
+      - CHANGELOG.md
+
+checksum:
+  name_template: 'checksums.txt'
+
+snapshot:
+  version_template: "{{ incpatch .Version }}-next"
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - '^docs:'
+      - '^test:'
+      - '^chore:'
+      - typo
+
+# Homebrew Tap
+brews:
+  - repository:
+      owner: aryankumar07
+      name: homebrew-tap
+      token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
+    directory: Formula
+    homepage: "https://github.com/aryankumar07/jsawn"
+    description: "Fast JSON parser and query tool"
+    license: "MIT"
+    test: |
+      system "#{bin}/jsawn --version"
+    install: |
+      bin.install "jsawn"
+
+# Arch Linux (AUR)
+aurs:
+  - name: jsawn-bin
+    homepage: "https://github.com/aryankumar07/jsawn"
+    description: "Fast JSON parser and query tool"
+    maintainers:
+      - 'Aryan Kumar ak2839426@gmail.com'
+    license: "MIT"
+    private_key: "{{ .Env.AUR_SSH_KEY }}"
+    git_url: 'ssh://aur@aur.archlinux.org/jsawn-bin.git'
+    package: |-
+      # bin
+      install -Dm755 "./jsawn" "${pkgdir}/usr/bin/jsawn"
+      
+      # license
+      install -Dm644 "./LICENSE" "${pkgdir}/usr/share/licenses/jsawn/LICENSE"
+    commit_author:
+      name: Aryan Kumar
+      email: ak2839426@gmail.com 
+
+# GitHub Release
+release:
+  github:
+    owner: aryankumar07
+    name: jsawn
+  draft: false
+  prerelease: auto
+  mode: append
+  header: |
+    ## Release {{ .Tag }} ({{ .Date }})
+    
+    Fast JSON parsing with jsawn!
+  footer: |
+    ## Installation
+    
+    ### Homebrew (macOS/Linux)
+    ```bash
+    brew tap aryankumar07/tap
+    brew install jsawn
+    ```
+    
+    ### Arch Linux (AUR)
+    ```bash
+    yay -S jsawn-bin
+    # or
+    paru -S jsawn-bin
+    ```
+    
+    ### Manual Installation
+    Download the appropriate archive for your platform from the assets below.
