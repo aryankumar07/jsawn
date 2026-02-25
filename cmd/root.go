@@ -5,43 +5,72 @@ package cmd
 
 import (
 	"fmt"
+	"io"
 	"log"
 	"os"
 
-	"github.com/aryankumar07/jsawn/jsonFormatter"
+	"github.com/aryankumar07/jsawn/tree"
 	"github.com/aryankumar07/jsawn/viewPage"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/spf13/cobra"
 )
 
 var rootCmd = &cobra.Command{
-	Use:   "jsawn",
-	Short: "",
-	Long:  ` `,
-	Args:  cobra.ArbitraryArgs,
-	Run:   runJsonFormatter,
+	Use:   "jsawn [file]",
+	Short: "Interactive JSON viewer for the terminal",
+	Long: `jsawn is a fast, interactive JSON viewer for the terminal.
+
+Pipe JSON from stdin or pass a file path as an argument:
+  cat data.json | jsawn
+  curl https://api.example.com | jsawn
+  jsawn data.json
+
+Navigate with vim-style keybindings, fold/expand nodes,
+and explore large JSON documents with ease.`,
+	Args: cobra.MaximumNArgs(1),
+	Run:  runJsonViewer,
 }
 
-func runJsonFormatter(cmd *cobra.Command, args []string) {
-	stat, err := os.Stdin.Stat()
-	if err != nil {
-		log.Fatalf("failed to check stdin: %v", err)
-	}
-	if (stat.Mode() & os.ModeCharDevice) == 0 {
-		jsonData, err := jsonFormatter.GetJsonDataFromPipe()
+func runJsonViewer(cmd *cobra.Command, args []string) {
+	var data []byte
+	var err error
+
+	stat, statErr := os.Stdin.Stat()
+	piped := statErr == nil && (stat.Mode()&os.ModeCharDevice) == 0
+
+	if piped {
+		data, err = io.ReadAll(os.Stdin)
 		if err != nil {
-			log.Fatalln(err)
+			log.Fatalf("failed to read stdin: %v", err)
 		}
-		m := viewPage.InitModel(*jsonData)
-		p := tea.NewProgram(
-			m,
-			tea.WithAltScreen(),
-			tea.WithMouseCellMotion(),
-		)
-		if _, err := p.Run(); err != nil {
-			fmt.Println("could not run program:", err)
-			os.Exit(1)
+	} else if len(args) == 1 {
+		data, err = os.ReadFile(args[0])
+		if err != nil {
+			log.Fatalf("failed to read file: %v", err)
 		}
+	} else {
+		cmd.Help()
+		return
+	}
+
+	if len(data) == 0 {
+		log.Fatalln("JSON returned null")
+	}
+
+	root, err := tree.Parse(data)
+	if err != nil {
+		log.Fatalf("failed to parse JSON: %v", err)
+	}
+
+	m := viewPage.InitModel(root)
+	p := tea.NewProgram(
+		m,
+		tea.WithAltScreen(),
+		tea.WithMouseCellMotion(),
+	)
+	if _, err := p.Run(); err != nil {
+		fmt.Println("could not run program:", err)
+		os.Exit(1)
 	}
 }
 
