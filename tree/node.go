@@ -188,3 +188,70 @@ func ExpandToNode(n *Node) {
 		p.Collapsed = false
 	}
 }
+
+// NodePath returns the jq-style dot notation path from root to this node.
+// e.g. ".users[0].name" for an object child inside an array inside "users".
+// Returns "." for the root node.
+func NodePath(n *Node) string {
+	var parts []string
+	for cur := n; cur != nil; cur = cur.Parent {
+		if cur.Parent == nil {
+			break
+		}
+		if cur.Parent.Type == TypeArray {
+			parts = append(parts, "["+cur.Key+"]")
+		} else {
+			parts = append(parts, "."+cur.Key)
+		}
+	}
+	for i, j := 0, len(parts)-1; i < j; i, j = i+1, j-1 {
+		parts[i], parts[j] = parts[j], parts[i]
+	}
+	if len(parts) == 0 {
+		return "."
+	}
+	result := strings.Join(parts, "")
+	if result[0] == '[' {
+		return "." + result
+	}
+	return result
+}
+
+// FlatEntry represents a leaf node with its full jq-style path, used in flatten view.
+type FlatEntry struct {
+	Node *Node
+	Path string
+}
+
+// FlattenLeaves walks the entire tree and returns all leaf (primitive) nodes
+// with their full paths. Containers are excluded.
+func FlattenLeaves(root *Node) []FlatEntry {
+	var entries []FlatEntry
+	flattenLeaves(root, &entries)
+	return entries
+}
+
+func flattenLeaves(n *Node, entries *[]FlatEntry) {
+	if !n.IsContainer() {
+		*entries = append(*entries, FlatEntry{
+			Node: n,
+			Path: NodePath(n),
+		})
+		return
+	}
+	for _, c := range n.Children {
+		flattenLeaves(c, entries)
+	}
+}
+
+// MatchesSearch returns true if the flat entry's path or value contains the query.
+func (e FlatEntry) MatchesSearch(query string) bool {
+	if query == "" {
+		return false
+	}
+	q := strings.ToLower(query)
+	if strings.Contains(strings.ToLower(e.Path), q) {
+		return true
+	}
+	return e.Node.MatchesSearch(query)
+}

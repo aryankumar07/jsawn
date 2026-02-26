@@ -22,8 +22,9 @@ var (
 		return titleStyle.BorderStyle(b)
 	}()
 
-	searchStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("3"))
-	noMatchStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("1"))
+	searchStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("3"))
+	noMatchStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("1"))
+	breadcrumbStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("4")).Bold(true)
 )
 
 type Model struct {
@@ -39,6 +40,8 @@ type Model struct {
 	searchQuery   string
 	searchMatches []int
 	matchIndex    int
+	flatMode      bool
+	flatEntries   []tree.FlatEntry
 }
 
 func InitModel(root *tree.Node) Model {
@@ -52,6 +55,14 @@ func InitModel(root *tree.Node) Model {
 
 func (m Model) Init() tea.Cmd {
 	return nil
+}
+
+// listLen returns the length of the current view's data (flat entries or visible tree nodes).
+func (m *Model) listLen() int {
+	if m.flatMode {
+		return len(m.flatEntries)
+	}
+	return len(m.visible)
 }
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -115,6 +126,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case key == "N":
 			m.prevMatch()
 
+		case key == "f":
+			m.flatMode = !m.flatMode
+			if m.flatMode {
+				m.flatEntries = tree.FlattenLeaves(m.root)
+			}
+			m.cursor = 0
+			m.offset = 0
+			m.rebuildSearchMatches()
+
 		case key == "j" || key == "down":
 			m.moveCursor(1)
 
@@ -122,32 +142,44 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.moveCursor(-1)
 
 		case key == "l" || key == "right":
-			m.expandOrEnter()
+			if !m.flatMode {
+				m.expandOrEnter()
+			}
 
 		case key == "h" || key == "left":
-			m.collapseOrParent()
+			if !m.flatMode {
+				m.collapseOrParent()
+			}
 
 		case key == " ":
-			m.toggleCurrent()
+			if !m.flatMode {
+				m.toggleCurrent()
+			}
 
 		case key == "e":
-			m.root.ExpandAll()
-			m.rebuildVisible()
+			if !m.flatMode {
+				m.root.ExpandAll()
+				m.rebuildVisible()
+			}
 
 		case key == "E":
-			m.root.CollapseAll()
-			m.rebuildVisible()
-			m.cursor = 0
+			if !m.flatMode {
+				m.root.CollapseAll()
+				m.rebuildVisible()
+				m.cursor = 0
+			}
 
 		case key >= "1" && key <= "9":
-			depth := int(key[0] - '0')
-			m.root.CollapseToDepth(depth)
-			m.rebuildVisible()
-			m.clampCursor()
+			if !m.flatMode {
+				depth := int(key[0] - '0')
+				m.root.CollapseToDepth(depth)
+				m.rebuildVisible()
+				m.clampCursor()
+			}
 
 		case key == "G":
 			m.gPressed = false
-			m.cursor = len(m.visible) - 1
+			m.cursor = m.listLen() - 1
 
 		case key == "g":
 			if m.gPressed {
@@ -198,8 +230,9 @@ func (m *Model) clampCursor() {
 	if m.cursor < 0 {
 		m.cursor = 0
 	}
-	if m.cursor >= len(m.visible) {
-		m.cursor = len(m.visible) - 1
+	n := m.listLen()
+	if m.cursor >= n {
+		m.cursor = n - 1
 	}
 	if m.cursor < 0 {
 		m.cursor = 0
@@ -216,7 +249,7 @@ func (m *Model) clampOffset() {
 	if m.cursor >= m.offset+m.height {
 		m.offset = m.cursor - m.height + 1
 	}
-	maxOffset := len(m.visible) - m.height
+	maxOffset := m.listLen() - m.height
 	if maxOffset < 0 {
 		maxOffset = 0
 	}
@@ -313,6 +346,24 @@ func (m *Model) executeSearch() {
 		return
 	}
 
+	if m.flatMode {
+		m.searchMatches = nil
+		for i, entry := range m.flatEntries {
+			if entry.MatchesSearch(m.searchQuery) {
+				m.searchMatches = append(m.searchMatches, i)
+			}
+		}
+		if len(m.searchMatches) > 0 {
+			m.matchIndex = 0
+			m.cursor = m.searchMatches[0]
+			m.clampOffset()
+		} else {
+			m.matchIndex = -1
+		}
+		return
+	}
+
+	// Tree mode search
 	matchingNodes := tree.FindMatchingNodes(m.root, m.searchQuery)
 	if len(matchingNodes) == 0 {
 		m.searchMatches = nil
@@ -376,9 +427,17 @@ func (m *Model) rebuildSearchMatches() {
 	}
 
 	m.searchMatches = nil
-	for i, entry := range m.visible {
-		if !entry.IsClosing && entry.Node.MatchesSearch(m.searchQuery) {
-			m.searchMatches = append(m.searchMatches, i)
+	if m.flatMode {
+		for i, entry := range m.flatEntries {
+			if entry.MatchesSearch(m.searchQuery) {
+				m.searchMatches = append(m.searchMatches, i)
+			}
+		}
+	} else {
+		for i, entry := range m.visible {
+			if !entry.IsClosing && entry.Node.MatchesSearch(m.searchQuery) {
+				m.searchMatches = append(m.searchMatches, i)
+			}
 		}
 	}
 
@@ -390,33 +449,72 @@ func (m *Model) rebuildSearchMatches() {
 }
 
 func (m Model) headerView() string {
-	title := titleStyle.Render("Mr. Jsawn")
+	titleText := "Mr. Jsawn"
+	if m.flatMode {
+		titleText = "Mr. Jsawn (flat)"
+	}
+	title := titleStyle.Render(titleText)
 	line := strings.Repeat("─", max(0, m.width-lipgloss.Width(title)))
 	return lipgloss.JoinHorizontal(lipgloss.Center, title, line)
 }
 
 func (m Model) footerView() string {
 	pct := 0.0
-	if len(m.visible) > 1 {
-		pct = float64(m.cursor) / float64(len(m.visible)-1) * 100
+	n := m.listLen()
+	if n > 1 {
+		pct = float64(m.cursor) / float64(n-1) * 100
 	}
 	info := infoStyle.Render(fmt.Sprintf("%3.f%%", pct))
+	infoWidth := lipgloss.Width(info)
 
-	var searchInfo string
+	// When in search mode, show search input instead of breadcrumb
 	if m.searching {
-		searchInfo = searchStyle.Render(fmt.Sprintf("/%s█", m.searchQuery))
-	} else if m.searchQuery != "" && len(m.searchMatches) == 0 {
-		searchInfo = noMatchStyle.Render("[no matches]")
-	} else if len(m.searchMatches) > 0 {
-		searchInfo = searchStyle.Render(fmt.Sprintf("[%d/%d]", m.matchIndex+1, len(m.searchMatches)))
+		searchInfo := searchStyle.Render(fmt.Sprintf("/%s█", m.searchQuery))
+		searchWidth := lipgloss.Width(searchInfo)
+		lineWidth := max(0, m.width-searchWidth-infoWidth)
+		line := strings.Repeat("─", lineWidth)
+		return lipgloss.JoinHorizontal(lipgloss.Center, searchInfo, line, info)
 	}
 
-	searchWidth := lipgloss.Width(searchInfo)
-	infoWidth := lipgloss.Width(info)
-	lineWidth := max(0, m.width-searchWidth-infoWidth)
+	// Breadcrumb path
+	path := "."
+	if m.flatMode {
+		if m.cursor < len(m.flatEntries) {
+			path = m.flatEntries[m.cursor].Path
+		}
+	} else {
+		if m.cursor < len(m.visible) {
+			path = tree.NodePath(m.visible[m.cursor].Node)
+		}
+	}
+
+	// Search status (appended after breadcrumb)
+	var searchInfo string
+	if m.searchQuery != "" && len(m.searchMatches) == 0 {
+		searchInfo = noMatchStyle.Render(" [no matches]")
+	} else if len(m.searchMatches) > 0 {
+		searchInfo = searchStyle.Render(fmt.Sprintf(" [%d/%d]", m.matchIndex+1, len(m.searchMatches)))
+	}
+
+	searchInfoWidth := lipgloss.Width(searchInfo)
+	availableForPath := m.width - infoWidth - searchInfoWidth - 1
+	if availableForPath < 1 {
+		availableForPath = 1
+	}
+
+	// Horizontal scroll: crop from the left if path is too long
+	pathRunes := []rune(path)
+	if len(pathRunes) > availableForPath {
+		path = string(pathRunes[len(pathRunes)-availableForPath:])
+	}
+
+	pathRendered := breadcrumbStyle.Render(path)
+	leftContent := pathRendered + searchInfo
+	leftWidth := lipgloss.Width(leftContent)
+	lineWidth := max(0, m.width-leftWidth-infoWidth)
 	line := strings.Repeat("─", lineWidth)
 
-	return lipgloss.JoinHorizontal(lipgloss.Center, searchInfo, line, info)
+	return lipgloss.JoinHorizontal(lipgloss.Center, leftContent, line, info)
 }
 
 func (m Model) View() string {
@@ -425,14 +523,20 @@ func (m Model) View() string {
 	}
 
 	var lines []string
+	total := m.listLen()
 	end := m.offset + m.height
-	if end > len(m.visible) {
-		end = len(m.visible)
+	if end > total {
+		end = total
 	}
 
 	for i := m.offset; i < end; i++ {
 		isCursor := i == m.cursor
-		line := tree.RenderEntry(m.visible[i], isCursor, m.width, m.searchQuery)
+		var line string
+		if m.flatMode {
+			line = tree.RenderFlatEntry(m.flatEntries[i], isCursor, m.width, m.searchQuery)
+		} else {
+			line = tree.RenderEntry(m.visible[i], isCursor, m.width, m.searchQuery)
+		}
 		lines = append(lines, line)
 	}
 

@@ -15,8 +15,9 @@ var (
 	boolStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("5")) // magenta
 	nullStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("1")) // red
 	bracketStyle = lipgloss.NewStyle()
-	cursorStyle  = lipgloss.NewStyle().Reverse(true)
-	matchStyle   = lipgloss.NewStyle().Background(lipgloss.Color("3")).Foreground(lipgloss.Color("0")) // yellow bg, black fg
+	cursorStyle   = lipgloss.NewStyle().Reverse(true)
+	matchStyle    = lipgloss.NewStyle().Background(lipgloss.Color("3")).Foreground(lipgloss.Color("0")) // yellow bg, black fg
+	flatPathStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("6"))                                // cyan, same as keys
 )
 
 const indent = "  "
@@ -140,6 +141,33 @@ func highlightText(text, query string, baseStyle lipgloss.Style) string {
 		i = matchEnd
 	}
 	return b.String()
+}
+
+// RenderFlatEntry renders a single flat-view line: .path = value
+func RenderFlatEntry(e FlatEntry, cursorOn bool, width int, searchQuery string) string {
+	pathStr := highlightText(e.Path, searchQuery, flatPathStyle)
+	eq := " = "
+
+	var valStr string
+	n := e.Node
+	switch n.Type {
+	case TypeString:
+		valStr = highlightText(fmt.Sprintf("%q", n.Value.(string)), searchQuery, stringStyle)
+	case TypeNumber:
+		valStr = highlightText(formatNumber(n.Value.(float64)), searchQuery, numberStyle)
+	case TypeBool:
+		valStr = highlightText(fmt.Sprintf("%t", n.Value.(bool)), searchQuery, boolStyle)
+	case TypeNull:
+		valStr = highlightText("null", searchQuery, nullStyle)
+	}
+
+	line := pathStr + eq + valStr
+
+	if cursorOn {
+		plain := lipgloss.NewStyle().Width(width).Render(line)
+		return cursorStyle.Render(plain)
+	}
+	return line
 }
 
 func formatNumber(f float64) string {
