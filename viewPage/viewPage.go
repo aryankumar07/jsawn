@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/aryankumar07/jsawn/command"
 	"github.com/aryankumar07/jsawn/tree"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -42,6 +43,17 @@ type Model struct {
 	matchIndex    int
 	flatMode      bool
 	flatEntries   []tree.FlatEntry
+
+	// Command mode
+	commandMode  bool
+	commandInput string
+
+	// Overlay
+	overlayActive  bool
+	overlayContent string
+	overlayLines   []string
+	overlayScroll  int
+	overlayCopied  bool
 }
 
 func InitModel(root *tree.Node) Model {
@@ -66,9 +78,58 @@ func (m *Model) listLen() int {
 }
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	// Handle copied flash expiry
+	if _, ok := msg.(copiedExpiredMsg); ok {
+		m.overlayCopied = false
+		return m, nil
+	}
+
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		key := msg.String()
+
+		// Overlay active — route all keys to overlay handler
+		if m.overlayActive {
+			if key == "ctrl+c" {
+				return m, tea.Quit
+			}
+			cmd := m.handleOverlayKey(key)
+			return m, cmd
+		}
+
+		// Command mode input
+		if m.commandMode {
+			switch key {
+			case "enter":
+				m.commandMode = false
+				input := m.commandInput
+				m.commandInput = ""
+				result := command.Execute(input, m.root)
+				if result.Error != "" {
+					m.initOverlay("Error: " + result.Error)
+				} else if result.Content != "" {
+					m.initOverlay(result.Content)
+				}
+				return m, nil
+			case "esc":
+				m.commandMode = false
+				m.commandInput = ""
+			case "ctrl+c":
+				return m, tea.Quit
+			case "backspace":
+				if len(m.commandInput) > 0 {
+					runes := []rune(m.commandInput)
+					m.commandInput = string(runes[:len(runes)-1])
+				}
+			case "ctrl+u":
+				m.commandInput = ""
+			default:
+				if len(key) == 1 && key[0] >= 32 && key[0] <= 126 {
+					m.commandInput += key
+				}
+			}
+			return m, nil
+		}
 
 		// Search mode input
 		if m.searching {
@@ -117,6 +178,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.searchQuery = ""
 			m.searchMatches = nil
 			m.matchIndex = -1
+			m.gPressed = false
+			return m, nil
+
+		case key == ":":
+			m.commandMode = true
+			m.commandInput = ""
 			m.gPressed = false
 			return m, nil
 
@@ -467,6 +534,15 @@ func (m Model) footerView() string {
 	info := infoStyle.Render(fmt.Sprintf("%3.f%%", pct))
 	infoWidth := lipgloss.Width(info)
 
+	// When in command mode, show command input
+	if m.commandMode {
+		cmdInfo := searchStyle.Render(fmt.Sprintf(":%s█", m.commandInput))
+		cmdWidth := lipgloss.Width(cmdInfo)
+		lineWidth := max(0, m.width-cmdWidth-infoWidth)
+		line := strings.Repeat("─", lineWidth)
+		return lipgloss.JoinHorizontal(lipgloss.Center, cmdInfo, line, info)
+	}
+
 	// When in search mode, show search input instead of breadcrumb
 	if m.searching {
 		searchInfo := searchStyle.Render(fmt.Sprintf("/%s█", m.searchQuery))
@@ -546,5 +622,11 @@ func (m Model) View() string {
 	}
 
 	content := strings.Join(lines, "\n")
-	return fmt.Sprintf("%s\n%s\n%s", m.headerView(), content, m.footerView())
+	base := fmt.Sprintf("%s\n%s\n%s", m.headerView(), content, m.footerView())
+
+	if m.overlayActive {
+		return m.renderOverlay()
+	}
+
+	return base
 }
