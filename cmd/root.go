@@ -9,6 +9,7 @@ import (
 	"log"
 	"os"
 
+	"github.com/aryankumar07/jsawn/source"
 	"github.com/aryankumar07/jsawn/tree"
 	"github.com/aryankumar07/jsawn/viewPage"
 	tea "github.com/charmbracelet/bubbletea"
@@ -16,7 +17,7 @@ import (
 )
 
 var rootCmd = &cobra.Command{
-	Use:   "jsawn [file]",
+	Use:   "jsawn [sources]",
 	Short: "Interactive JSON viewer for the terminal",
 	Long: `jsawn is a fast, interactive JSON viewer for the terminal.
 
@@ -25,6 +26,12 @@ Pipe JSON from stdin or pass a file path as an argument:
   curl https://api.example.com | jsawn
   jsawn data.json
 
+Fetch JSON from a URL:
+  jsawn https://api.example.com/data
+
+View multiple sources (comma-separated):
+  jsawn file.json,https://api.com/data,other.json
+
 Navigate with vim-style keybindings, fold/expand nodes,
 and explore large JSON documents with ease.`,
 	Args: cobra.MaximumNArgs(1),
@@ -32,37 +39,49 @@ and explore large JSON documents with ease.`,
 }
 
 func runJsonViewer(cmd *cobra.Command, args []string) {
-	var data []byte
-	var err error
+	var stdinData []byte
 
 	stat, statErr := os.Stdin.Stat()
 	piped := statErr == nil && (stat.Mode()&os.ModeCharDevice) == 0
 
 	if piped {
-		data, err = io.ReadAll(os.Stdin)
+		var err error
+		stdinData, err = io.ReadAll(os.Stdin)
 		if err != nil {
 			log.Fatalf("failed to read stdin: %v", err)
 		}
-	} else if len(args) == 1 {
-		data, err = os.ReadFile(args[0])
-		if err != nil {
-			log.Fatalf("failed to read file: %v", err)
-		}
-	} else {
+	}
+
+	var arg string
+	if len(args) == 1 {
+		arg = args[0]
+	}
+
+	sources := source.ResolveAll(arg, stdinData)
+	if len(sources) == 0 {
 		cmd.Help()
 		return
 	}
 
-	if len(data) == 0 {
-		log.Fatalln("JSON returned null")
+	tabs := make([]viewPage.TabData, len(sources))
+	for i, src := range sources {
+		td := viewPage.TabData{Label: src.Label}
+		if src.Err != nil {
+			td.Error = src.Err.Error()
+		} else if len(src.Data) == 0 {
+			td.Error = "empty response"
+		} else {
+			root, err := tree.Parse(src.Data)
+			if err != nil {
+				td.Error = fmt.Sprintf("invalid JSON: %v", err)
+			} else {
+				td.Root = root
+			}
+		}
+		tabs[i] = td
 	}
 
-	root, err := tree.Parse(data)
-	if err != nil {
-		log.Fatalf("failed to parse JSON: %v", err)
-	}
-
-	m := viewPage.InitModel(root)
+	m := viewPage.InitModel(tabs)
 	p := tea.NewProgram(
 		m,
 		tea.WithAltScreen(),

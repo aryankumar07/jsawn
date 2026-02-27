@@ -26,29 +26,40 @@ var (
 	searchStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("3"))
 	noMatchStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("1"))
 	breadcrumbStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("4")).Bold(true)
+
+	activeTabStyle   = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("15")).Background(lipgloss.Color("4")).Padding(0, 1)
+	inactiveTabStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("8")).Padding(0, 1)
+	errorTabStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("1"))
 )
 
-type Model struct {
-	root          *tree.Node
-	visible       []tree.VisibleEntry
-	cursor        int
-	offset        int
-	width         int
-	height        int
-	ready         bool
+// TabData is the input type passed from cmd/root.go to build tabs.
+type TabData struct {
+	Label string
+	Root  *tree.Node
+	Error string
+}
+
+// TabState holds all per-document state for one tab.
+type TabState struct {
+	label   string
+	root    *tree.Node
+	errMsg  string
+	visible []tree.VisibleEntry
+	cursor  int
+	offset  int
+
 	gPressed      bool
 	searching     bool
 	searchQuery   string
 	searchMatches []int
 	matchIndex    int
-	flatMode      bool
-	flatEntries   []tree.FlatEntry
 
-	// Command mode
+	flatMode    bool
+	flatEntries []tree.FlatEntry
+
 	commandMode  bool
 	commandInput string
 
-	// Overlay
 	overlayActive  bool
 	overlayContent string
 	overlayLines   []string
@@ -56,40 +67,67 @@ type Model struct {
 	overlayCopied  bool
 }
 
-func InitModel(root *tree.Node) Model {
-	visible := tree.VisibleNodes(root)
-	return Model{
-		root:       root,
-		visible:    visible,
-		matchIndex: -1,
+type Model struct {
+	tabs      []TabState
+	activeTab int
+	width     int
+	height    int
+	ready     bool
+}
+
+func InitModel(tabsData []TabData) Model {
+	tabs := make([]TabState, len(tabsData))
+	for i, td := range tabsData {
+		t := TabState{
+			label:      td.Label,
+			matchIndex: -1,
+		}
+		if td.Error != "" {
+			t.errMsg = td.Error
+		} else {
+			t.root = td.Root
+			t.visible = tree.VisibleNodes(td.Root)
+		}
+		tabs[i] = t
 	}
+	return Model{
+		tabs: tabs,
+	}
+}
+
+func (m *Model) active() *TabState {
+	return &m.tabs[m.activeTab]
 }
 
 func (m Model) Init() tea.Cmd {
 	return nil
 }
 
-// listLen returns the length of the current view's data (flat entries or visible tree nodes).
-func (m *Model) listLen() int {
-	if m.flatMode {
-		return len(m.flatEntries)
+// listLen returns the length of the current tab's data.
+func (t *TabState) listLen() int {
+	if t.flatMode {
+		return len(t.flatEntries)
 	}
-	return len(m.visible)
+	return len(t.visible)
 }
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// Handle copied flash expiry
-	if _, ok := msg.(copiedExpiredMsg); ok {
-		m.overlayCopied = false
+	if ce, ok := msg.(copiedExpiredMsg); ok {
+		if ce.tabIndex >= 0 && ce.tabIndex < len(m.tabs) {
+			m.tabs[ce.tabIndex].overlayCopied = false
+		}
 		return m, nil
 	}
+
+	t := m.active()
 
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		key := msg.String()
 
 		// Overlay active — route all keys to overlay handler
-		if m.overlayActive {
+		if t.overlayActive {
 			if key == "ctrl+c" {
 				return m, tea.Quit
 			}
@@ -97,14 +135,37 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, cmd
 		}
 
+		// Tab switching is always available (except in text input modes)
+		if !t.searching && !t.commandMode && len(m.tabs) > 1 {
+			switch key {
+			case "tab":
+				m.activeTab = (m.activeTab + 1) % len(m.tabs)
+				return m, nil
+			case "shift+tab":
+				m.activeTab = (m.activeTab - 1 + len(m.tabs)) % len(m.tabs)
+				return m, nil
+			}
+		}
+
+		// If active tab has an error, only allow quit/esc/tab switching
+		if t.errMsg != "" {
+			switch key {
+			case "ctrl+c", "q":
+				return m, tea.Quit
+			case "esc":
+				return m, tea.Quit
+			}
+			return m, nil
+		}
+
 		// Command mode input
-		if m.commandMode {
+		if t.commandMode {
 			switch key {
 			case "enter":
-				m.commandMode = false
-				input := m.commandInput
-				m.commandInput = ""
-				result := command.Execute(input, m.root)
+				t.commandMode = false
+				input := t.commandInput
+				t.commandInput = ""
+				result := command.Execute(input, t.root)
 				if result.Error != "" {
 					m.initOverlay("Error: " + result.Error)
 				} else if result.Content != "" {
@@ -112,48 +173,48 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				return m, nil
 			case "esc":
-				m.commandMode = false
-				m.commandInput = ""
+				t.commandMode = false
+				t.commandInput = ""
 			case "ctrl+c":
 				return m, tea.Quit
 			case "backspace":
-				if len(m.commandInput) > 0 {
-					runes := []rune(m.commandInput)
-					m.commandInput = string(runes[:len(runes)-1])
+				if len(t.commandInput) > 0 {
+					runes := []rune(t.commandInput)
+					t.commandInput = string(runes[:len(runes)-1])
 				}
 			case "ctrl+u":
-				m.commandInput = ""
+				t.commandInput = ""
 			default:
 				if len(key) == 1 && key[0] >= 32 && key[0] <= 126 {
-					m.commandInput += key
+					t.commandInput += key
 				}
 			}
 			return m, nil
 		}
 
 		// Search mode input
-		if m.searching {
+		if t.searching {
 			switch key {
 			case "enter":
-				m.searching = false
+				t.searching = false
 				m.executeSearch()
 			case "esc":
-				m.searching = false
-				m.searchQuery = ""
-				m.searchMatches = nil
-				m.matchIndex = -1
+				t.searching = false
+				t.searchQuery = ""
+				t.searchMatches = nil
+				t.matchIndex = -1
 			case "ctrl+c":
 				return m, tea.Quit
 			case "backspace":
-				if len(m.searchQuery) > 0 {
-					runes := []rune(m.searchQuery)
-					m.searchQuery = string(runes[:len(runes)-1])
+				if len(t.searchQuery) > 0 {
+					runes := []rune(t.searchQuery)
+					t.searchQuery = string(runes[:len(runes)-1])
 				}
 			case "ctrl+u":
-				m.searchQuery = ""
+				t.searchQuery = ""
 			default:
 				if len(key) == 1 && key[0] >= 32 && key[0] <= 126 {
-					m.searchQuery += key
+					t.searchQuery += key
 				}
 			}
 			return m, nil
@@ -165,26 +226,26 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 
 		case key == "esc":
-			if m.searchQuery != "" {
-				m.searchQuery = ""
-				m.searchMatches = nil
-				m.matchIndex = -1
+			if t.searchQuery != "" {
+				t.searchQuery = ""
+				t.searchMatches = nil
+				t.matchIndex = -1
 			} else {
 				return m, tea.Quit
 			}
 
 		case key == "/":
-			m.searching = true
-			m.searchQuery = ""
-			m.searchMatches = nil
-			m.matchIndex = -1
-			m.gPressed = false
+			t.searching = true
+			t.searchQuery = ""
+			t.searchMatches = nil
+			t.matchIndex = -1
+			t.gPressed = false
 			return m, nil
 
 		case key == ":":
-			m.commandMode = true
-			m.commandInput = ""
-			m.gPressed = false
+			t.commandMode = true
+			t.commandInput = ""
+			t.gPressed = false
 			return m, nil
 
 		case key == "n":
@@ -194,12 +255,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.prevMatch()
 
 		case key == "f":
-			m.flatMode = !m.flatMode
-			if m.flatMode {
-				m.flatEntries = tree.FlattenLeaves(m.root)
+			t.flatMode = !t.flatMode
+			if t.flatMode {
+				t.flatEntries = tree.FlattenLeaves(t.root)
 			}
-			m.cursor = 0
-			m.offset = 0
+			t.cursor = 0
+			t.offset = 0
 			m.rebuildSearchMatches()
 
 		case key == "j" || key == "down":
@@ -209,60 +270,60 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.moveCursor(-1)
 
 		case key == "l" || key == "right":
-			if !m.flatMode {
+			if !t.flatMode {
 				m.expandOrEnter()
 			}
 
 		case key == "h" || key == "left":
-			if !m.flatMode {
+			if !t.flatMode {
 				m.collapseOrParent()
 			}
 
 		case key == " ":
-			if !m.flatMode {
+			if !t.flatMode {
 				m.toggleCurrent()
 			}
 
 		case key == "e":
-			if !m.flatMode {
-				m.root.ExpandAll()
+			if !t.flatMode {
+				t.root.ExpandAll()
 				m.rebuildVisible()
 			}
 
 		case key == "E":
-			if !m.flatMode {
-				m.root.CollapseAll()
+			if !t.flatMode {
+				t.root.CollapseAll()
 				m.rebuildVisible()
-				m.cursor = 0
+				t.cursor = 0
 			}
 
 		case key >= "1" && key <= "9":
-			if !m.flatMode {
+			if !t.flatMode {
 				depth := int(key[0] - '0')
-				m.root.CollapseToDepth(depth)
+				t.root.CollapseToDepth(depth)
 				m.rebuildVisible()
 				m.clampCursor()
 			}
 
 		case key == "G":
-			m.gPressed = false
-			m.cursor = m.listLen() - 1
+			t.gPressed = false
+			t.cursor = t.listLen() - 1
 
 		case key == "g":
-			if m.gPressed {
-				m.cursor = 0
-				m.gPressed = false
+			if t.gPressed {
+				t.cursor = 0
+				t.gPressed = false
 			} else {
-				m.gPressed = true
+				t.gPressed = true
 				return m, nil
 			}
 
 		default:
-			m.gPressed = false
+			t.gPressed = false
 		}
 
 		if key != "g" {
-			m.gPressed = false
+			t.gPressed = false
 		}
 		m.clampOffset()
 
@@ -277,10 +338,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case tea.WindowSizeMsg:
-		headerHeight := lipgloss.Height(m.headerView())
-		footerHeight := lipgloss.Height(m.footerView())
 		m.width = msg.Width
-		m.height = msg.Height - headerHeight - footerHeight
+		m.height = msg.Height - m.chromeHeight()
 		m.ready = true
 		m.clampOffset()
 	}
@@ -288,51 +347,66 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// chromeHeight returns the total height of non-content chrome (header, footer, tab bar).
+func (m *Model) chromeHeight() int {
+	headerHeight := lipgloss.Height(m.headerView())
+	footerHeight := lipgloss.Height(m.footerView())
+	tabBarHeight := 0
+	if len(m.tabs) > 1 {
+		tabBarHeight = 1
+	}
+	return headerHeight + footerHeight + tabBarHeight
+}
+
 func (m *Model) moveCursor(delta int) {
-	m.cursor += delta
+	t := m.active()
+	t.cursor += delta
 	m.clampCursor()
 }
 
 func (m *Model) clampCursor() {
-	if m.cursor < 0 {
-		m.cursor = 0
+	t := m.active()
+	if t.cursor < 0 {
+		t.cursor = 0
 	}
-	n := m.listLen()
-	if m.cursor >= n {
-		m.cursor = n - 1
+	n := t.listLen()
+	if t.cursor >= n {
+		t.cursor = n - 1
 	}
-	if m.cursor < 0 {
-		m.cursor = 0
+	if t.cursor < 0 {
+		t.cursor = 0
 	}
 }
 
 func (m *Model) clampOffset() {
+	t := m.active()
 	if m.height <= 0 {
 		return
 	}
-	if m.cursor < m.offset {
-		m.offset = m.cursor
+	if t.cursor < t.offset {
+		t.offset = t.cursor
 	}
-	if m.cursor >= m.offset+m.height {
-		m.offset = m.cursor - m.height + 1
+	if t.cursor >= t.offset+m.height {
+		t.offset = t.cursor - m.height + 1
 	}
-	maxOffset := m.listLen() - m.height
+	maxOffset := t.listLen() - m.height
 	if maxOffset < 0 {
 		maxOffset = 0
 	}
-	if m.offset > maxOffset {
-		m.offset = maxOffset
+	if t.offset > maxOffset {
+		t.offset = maxOffset
 	}
-	if m.offset < 0 {
-		m.offset = 0
+	if t.offset < 0 {
+		t.offset = 0
 	}
 }
 
 func (m *Model) expandOrEnter() {
-	if m.cursor >= len(m.visible) {
+	t := m.active()
+	if t.cursor >= len(t.visible) {
 		return
 	}
-	entry := m.visible[m.cursor]
+	entry := t.visible[t.cursor]
 	if entry.IsClosing {
 		return
 	}
@@ -344,21 +418,20 @@ func (m *Model) expandOrEnter() {
 		n.Toggle()
 		m.rebuildVisible()
 	} else if len(n.Children) > 0 {
-		// enter first child
-		m.cursor++
+		t.cursor++
 		m.clampCursor()
 	}
 }
 
 func (m *Model) collapseOrParent() {
-	if m.cursor >= len(m.visible) {
+	t := m.active()
+	if t.cursor >= len(t.visible) {
 		return
 	}
-	entry := m.visible[m.cursor]
+	entry := t.visible[t.cursor]
 	n := entry.Node
 
 	if entry.IsClosing {
-		// jump to the opening line of this container
 		m.jumpToNode(n)
 		return
 	}
@@ -369,16 +442,16 @@ func (m *Model) collapseOrParent() {
 		return
 	}
 
-	// jump to parent
 	if n.Parent != nil {
 		m.jumpToNode(n.Parent)
 	}
 }
 
 func (m *Model) jumpToNode(target *tree.Node) {
-	for i, e := range m.visible {
+	t := m.active()
+	for i, e := range t.visible {
 		if e.Node == target && !e.IsClosing {
-			m.cursor = i
+			t.cursor = i
 			break
 		}
 	}
@@ -386,10 +459,11 @@ func (m *Model) jumpToNode(target *tree.Node) {
 }
 
 func (m *Model) toggleCurrent() {
-	if m.cursor >= len(m.visible) {
+	t := m.active()
+	if t.cursor >= len(t.visible) {
 		return
 	}
-	entry := m.visible[m.cursor]
+	entry := t.visible[t.cursor]
 	if entry.IsClosing {
 		return
 	}
@@ -402,122 +476,159 @@ func (m *Model) toggleCurrent() {
 }
 
 func (m *Model) rebuildVisible() {
-	m.visible = tree.VisibleNodes(m.root)
+	t := m.active()
+	t.visible = tree.VisibleNodes(t.root)
 	m.rebuildSearchMatches()
 }
 
 func (m *Model) executeSearch() {
-	if m.searchQuery == "" {
-		m.searchMatches = nil
-		m.matchIndex = -1
+	t := m.active()
+	if t.searchQuery == "" {
+		t.searchMatches = nil
+		t.matchIndex = -1
 		return
 	}
 
-	if m.flatMode {
-		m.searchMatches = nil
-		for i, entry := range m.flatEntries {
-			if entry.MatchesSearch(m.searchQuery) {
-				m.searchMatches = append(m.searchMatches, i)
+	if t.flatMode {
+		t.searchMatches = nil
+		for i, entry := range t.flatEntries {
+			if entry.MatchesSearch(t.searchQuery) {
+				t.searchMatches = append(t.searchMatches, i)
 			}
 		}
-		if len(m.searchMatches) > 0 {
-			m.matchIndex = 0
-			m.cursor = m.searchMatches[0]
+		if len(t.searchMatches) > 0 {
+			t.matchIndex = 0
+			t.cursor = t.searchMatches[0]
 			m.clampOffset()
 		} else {
-			m.matchIndex = -1
+			t.matchIndex = -1
 		}
 		return
 	}
 
 	// Tree mode search
-	matchingNodes := tree.FindMatchingNodes(m.root, m.searchQuery)
+	matchingNodes := tree.FindMatchingNodes(t.root, t.searchQuery)
 	if len(matchingNodes) == 0 {
-		m.searchMatches = nil
-		m.matchIndex = -1
+		t.searchMatches = nil
+		t.matchIndex = -1
 		return
 	}
 
-	// Expand all ancestors so matches become visible
 	for _, n := range matchingNodes {
 		tree.ExpandToNode(n)
 	}
 
-	m.visible = tree.VisibleNodes(m.root)
+	t.visible = tree.VisibleNodes(t.root)
 
-	// Map matching nodes to their visible indices
 	matchSet := make(map[*tree.Node]bool)
 	for _, n := range matchingNodes {
 		matchSet[n] = true
 	}
 
-	m.searchMatches = nil
-	for i, entry := range m.visible {
+	t.searchMatches = nil
+	for i, entry := range t.visible {
 		if !entry.IsClosing && matchSet[entry.Node] {
-			m.searchMatches = append(m.searchMatches, i)
+			t.searchMatches = append(t.searchMatches, i)
 		}
 	}
 
-	if len(m.searchMatches) > 0 {
-		m.matchIndex = 0
-		m.cursor = m.searchMatches[0]
+	if len(t.searchMatches) > 0 {
+		t.matchIndex = 0
+		t.cursor = t.searchMatches[0]
 		m.clampOffset()
 	}
 }
 
 func (m *Model) nextMatch() {
-	if len(m.searchMatches) == 0 {
+	t := m.active()
+	if len(t.searchMatches) == 0 {
 		return
 	}
-	m.matchIndex = (m.matchIndex + 1) % len(m.searchMatches)
-	m.cursor = m.searchMatches[m.matchIndex]
+	t.matchIndex = (t.matchIndex + 1) % len(t.searchMatches)
+	t.cursor = t.searchMatches[t.matchIndex]
 	m.clampOffset()
 }
 
 func (m *Model) prevMatch() {
-	if len(m.searchMatches) == 0 {
+	t := m.active()
+	if len(t.searchMatches) == 0 {
 		return
 	}
-	m.matchIndex--
-	if m.matchIndex < 0 {
-		m.matchIndex = len(m.searchMatches) - 1
+	t.matchIndex--
+	if t.matchIndex < 0 {
+		t.matchIndex = len(t.searchMatches) - 1
 	}
-	m.cursor = m.searchMatches[m.matchIndex]
+	t.cursor = t.searchMatches[t.matchIndex]
 	m.clampOffset()
 }
 
 func (m *Model) rebuildSearchMatches() {
-	if m.searchQuery == "" {
-		m.searchMatches = nil
-		m.matchIndex = -1
+	t := m.active()
+	if t.searchQuery == "" {
+		t.searchMatches = nil
+		t.matchIndex = -1
 		return
 	}
 
-	m.searchMatches = nil
-	if m.flatMode {
-		for i, entry := range m.flatEntries {
-			if entry.MatchesSearch(m.searchQuery) {
-				m.searchMatches = append(m.searchMatches, i)
+	t.searchMatches = nil
+	if t.flatMode {
+		for i, entry := range t.flatEntries {
+			if entry.MatchesSearch(t.searchQuery) {
+				t.searchMatches = append(t.searchMatches, i)
 			}
 		}
 	} else {
-		for i, entry := range m.visible {
-			if !entry.IsClosing && entry.Node.MatchesSearch(m.searchQuery) {
-				m.searchMatches = append(m.searchMatches, i)
+		for i, entry := range t.visible {
+			if !entry.IsClosing && entry.Node.MatchesSearch(t.searchQuery) {
+				t.searchMatches = append(t.searchMatches, i)
 			}
 		}
 	}
 
-	if len(m.searchMatches) == 0 {
-		m.matchIndex = -1
-	} else if m.matchIndex >= len(m.searchMatches) {
-		m.matchIndex = len(m.searchMatches) - 1
+	if len(t.searchMatches) == 0 {
+		t.matchIndex = -1
+	} else if t.matchIndex >= len(t.searchMatches) {
+		t.matchIndex = len(t.searchMatches) - 1
 	}
 }
 
+func (m Model) tabBarView() string {
+	if len(m.tabs) <= 1 {
+		return ""
+	}
+
+	var parts []string
+	for i, tab := range m.tabs {
+		label := tab.label
+		// Truncate long labels
+		if len(label) > 30 {
+			label = label[:27] + "..."
+		}
+		// Mark error tabs
+		if tab.errMsg != "" {
+			label = label + " " + errorTabStyle.Render("!")
+		}
+
+		if i == m.activeTab {
+			parts = append(parts, activeTabStyle.Render(label))
+		} else {
+			parts = append(parts, inactiveTabStyle.Render(label))
+		}
+	}
+
+	bar := lipgloss.JoinHorizontal(lipgloss.Top, parts...)
+	// Pad to full width
+	barWidth := lipgloss.Width(bar)
+	if barWidth < m.width {
+		bar += strings.Repeat(" ", m.width-barWidth)
+	}
+	return bar
+}
+
 func (m Model) headerView() string {
+	t := m.tabs[m.activeTab]
 	titleText := "Mr. Jsawn"
-	if m.flatMode {
+	if t.flatMode {
 		titleText = "Mr. Jsawn (flat)"
 	}
 	title := titleStyle.Render(titleText)
@@ -526,17 +637,18 @@ func (m Model) headerView() string {
 }
 
 func (m Model) footerView() string {
+	t := m.tabs[m.activeTab]
 	pct := 0.0
-	n := m.listLen()
+	n := t.listLen()
 	if n > 1 {
-		pct = float64(m.cursor) / float64(n-1) * 100
+		pct = float64(t.cursor) / float64(n-1) * 100
 	}
 	info := infoStyle.Render(fmt.Sprintf("%3.f%%", pct))
 	infoWidth := lipgloss.Width(info)
 
 	// When in command mode, show command input
-	if m.commandMode {
-		cmdInfo := searchStyle.Render(fmt.Sprintf(":%s█", m.commandInput))
+	if t.commandMode {
+		cmdInfo := searchStyle.Render(fmt.Sprintf(":%s█", t.commandInput))
 		cmdWidth := lipgloss.Width(cmdInfo)
 		lineWidth := max(0, m.width-cmdWidth-infoWidth)
 		line := strings.Repeat("─", lineWidth)
@@ -544,8 +656,8 @@ func (m Model) footerView() string {
 	}
 
 	// When in search mode, show search input instead of breadcrumb
-	if m.searching {
-		searchInfo := searchStyle.Render(fmt.Sprintf("/%s█", m.searchQuery))
+	if t.searching {
+		searchInfo := searchStyle.Render(fmt.Sprintf("/%s█", t.searchQuery))
 		searchWidth := lipgloss.Width(searchInfo)
 		lineWidth := max(0, m.width-searchWidth-infoWidth)
 		line := strings.Repeat("─", lineWidth)
@@ -554,22 +666,22 @@ func (m Model) footerView() string {
 
 	// Breadcrumb path
 	path := "."
-	if m.flatMode {
-		if m.cursor < len(m.flatEntries) {
-			path = m.flatEntries[m.cursor].Path
+	if t.flatMode {
+		if t.cursor < len(t.flatEntries) {
+			path = t.flatEntries[t.cursor].Path
 		}
 	} else {
-		if m.cursor < len(m.visible) {
-			path = tree.NodePath(m.visible[m.cursor].Node)
+		if t.cursor < len(t.visible) {
+			path = tree.NodePath(t.visible[t.cursor].Node)
 		}
 	}
 
-	// Search status (appended after breadcrumb)
+	// Search status
 	var searchInfo string
-	if m.searchQuery != "" && len(m.searchMatches) == 0 {
+	if t.searchQuery != "" && len(t.searchMatches) == 0 {
 		searchInfo = noMatchStyle.Render(" [no matches]")
-	} else if len(m.searchMatches) > 0 {
-		searchInfo = searchStyle.Render(fmt.Sprintf(" [%d/%d]", m.matchIndex+1, len(m.searchMatches)))
+	} else if len(t.searchMatches) > 0 {
+		searchInfo = searchStyle.Render(fmt.Sprintf(" [%d/%d]", t.matchIndex+1, len(t.searchMatches)))
 	}
 
 	searchInfoWidth := lipgloss.Width(searchInfo)
@@ -578,7 +690,6 @@ func (m Model) footerView() string {
 		availableForPath = 1
 	}
 
-	// Horizontal scroll: crop from the left if path is too long
 	pathRunes := []rune(path)
 	if len(pathRunes) > availableForPath {
 		path = string(pathRunes[len(pathRunes)-availableForPath:])
@@ -598,33 +709,68 @@ func (m Model) View() string {
 		return "\n  Initializing..."
 	}
 
+	t := m.tabs[m.activeTab]
+
+	// Tab bar (only shown when multiple tabs)
+	tabBar := m.tabBarView()
+
+	// Error tab rendering
+	if t.errMsg != "" {
+		errStyle := lipgloss.NewStyle().
+			Foreground(lipgloss.Color("1")).
+			Bold(true).
+			Width(m.width).
+			Align(lipgloss.Center)
+
+		errContent := errStyle.Render(fmt.Sprintf("Error: %s", t.errMsg))
+
+		// Vertically center the error
+		padding := m.height / 2
+		var lines []string
+		for i := 0; i < padding; i++ {
+			lines = append(lines, "")
+		}
+		lines = append(lines, errContent)
+		for len(lines) < m.height {
+			lines = append(lines, "")
+		}
+		content := strings.Join(lines, "\n")
+		base := fmt.Sprintf("%s\n%s\n%s", m.headerView(), content, m.footerView())
+		if tabBar != "" {
+			base = tabBar + "\n" + base
+		}
+		return base
+	}
+
 	var lines []string
-	total := m.listLen()
-	end := m.offset + m.height
+	total := t.listLen()
+	end := t.offset + m.height
 	if end > total {
 		end = total
 	}
 
-	for i := m.offset; i < end; i++ {
-		isCursor := i == m.cursor
+	for i := t.offset; i < end; i++ {
+		isCursor := i == t.cursor
 		var line string
-		if m.flatMode {
-			line = tree.RenderFlatEntry(m.flatEntries[i], isCursor, m.width, m.searchQuery)
+		if t.flatMode {
+			line = tree.RenderFlatEntry(t.flatEntries[i], isCursor, m.width, t.searchQuery)
 		} else {
-			line = tree.RenderEntry(m.visible[i], isCursor, m.width, m.searchQuery)
+			line = tree.RenderEntry(t.visible[i], isCursor, m.width, t.searchQuery)
 		}
 		lines = append(lines, line)
 	}
 
-	// pad with empty lines if content is shorter than viewport
 	for len(lines) < m.height {
 		lines = append(lines, "")
 	}
 
 	content := strings.Join(lines, "\n")
 	base := fmt.Sprintf("%s\n%s\n%s", m.headerView(), content, m.footerView())
+	if tabBar != "" {
+		base = tabBar + "\n" + base
+	}
 
-	if m.overlayActive {
+	if t.overlayActive {
 		return m.renderOverlay()
 	}
 

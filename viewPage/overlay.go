@@ -28,27 +28,32 @@ var (
 		Bold(true)
 )
 
-type copiedExpiredMsg struct{}
+type copiedExpiredMsg struct {
+	tabIndex int
+}
 
 func (m *Model) initOverlay(content string) {
-	m.overlayActive = true
-	m.overlayContent = content
-	m.overlayLines = strings.Split(content, "\n")
-	m.overlayScroll = 0
-	m.overlayCopied = false
+	t := m.active()
+	t.overlayActive = true
+	t.overlayContent = content
+	t.overlayLines = strings.Split(content, "\n")
+	t.overlayScroll = 0
+	t.overlayCopied = false
 }
 
 func (m *Model) dismissOverlay() {
-	m.overlayActive = false
-	m.overlayContent = ""
-	m.overlayLines = nil
-	m.overlayScroll = 0
-	m.overlayCopied = false
+	t := m.active()
+	t.overlayActive = false
+	t.overlayContent = ""
+	t.overlayLines = nil
+	t.overlayScroll = 0
+	t.overlayCopied = false
 }
 
 func (m *Model) handleOverlayKey(key string) tea.Cmd {
+	t := m.active()
 	overlayH := m.overlayHeight()
-	maxScroll := len(m.overlayLines) - overlayH
+	maxScroll := len(t.overlayLines) - overlayH
 	if maxScroll < 0 {
 		maxScroll = 0
 	}
@@ -57,34 +62,35 @@ func (m *Model) handleOverlayKey(key string) tea.Cmd {
 	case "q", "esc":
 		m.dismissOverlay()
 	case "j", "down":
-		m.overlayScroll++
-		if m.overlayScroll > maxScroll {
-			m.overlayScroll = maxScroll
+		t.overlayScroll++
+		if t.overlayScroll > maxScroll {
+			t.overlayScroll = maxScroll
 		}
 	case "k", "up":
-		m.overlayScroll--
-		if m.overlayScroll < 0 {
-			m.overlayScroll = 0
+		t.overlayScroll--
+		if t.overlayScroll < 0 {
+			t.overlayScroll = 0
 		}
 	case "d":
-		m.overlayScroll += overlayH / 2
-		if m.overlayScroll > maxScroll {
-			m.overlayScroll = maxScroll
+		t.overlayScroll += overlayH / 2
+		if t.overlayScroll > maxScroll {
+			t.overlayScroll = maxScroll
 		}
 	case "u":
-		m.overlayScroll -= overlayH / 2
-		if m.overlayScroll < 0 {
-			m.overlayScroll = 0
+		t.overlayScroll -= overlayH / 2
+		if t.overlayScroll < 0 {
+			t.overlayScroll = 0
 		}
 	case "G":
-		m.overlayScroll = maxScroll
+		t.overlayScroll = maxScroll
 	case "g":
-		m.overlayScroll = 0
+		t.overlayScroll = 0
 	case "y":
-		copyToClipboard(m.overlayContent)
-		m.overlayCopied = true
+		copyToClipboard(t.overlayContent)
+		t.overlayCopied = true
+		tabIdx := m.activeTab
 		return tea.Tick(2*time.Second, func(time.Time) tea.Msg {
-			return copiedExpiredMsg{}
+			return copiedExpiredMsg{tabIndex: tabIdx}
 		})
 	}
 	return nil
@@ -107,13 +113,14 @@ func (m *Model) overlayWidth() int {
 }
 
 func (m Model) renderOverlay() string {
+	t := m.tabs[m.activeTab]
 	w := m.overlayWidth()
 	h := m.overlayHeight()
 
 	// Title bar
 	title := overlayTitleStyle.Render("Schema")
 	hint := " j/k:scroll  y:copy  q:close"
-	if m.overlayCopied {
+	if t.overlayCopied {
 		hint = " " + copiedStyle.Render("Copied!")
 	}
 	hintStr := overlayHintStyle.Render(hint)
@@ -125,16 +132,16 @@ func (m Model) renderOverlay() string {
 		contentH = 1
 	}
 
-	end := m.overlayScroll + contentH
-	if end > len(m.overlayLines) {
-		end = len(m.overlayLines)
+	end := t.overlayScroll + contentH
+	if end > len(t.overlayLines) {
+		end = len(t.overlayLines)
 	}
-	start := m.overlayScroll
-	if start > len(m.overlayLines) {
-		start = len(m.overlayLines)
+	start := t.overlayScroll
+	if start > len(t.overlayLines) {
+		start = len(t.overlayLines)
 	}
 
-	visibleLines := m.overlayLines[start:end]
+	visibleLines := t.overlayLines[start:end]
 	// Pad to fill height
 	for len(visibleLines) < contentH {
 		visibleLines = append(visibleLines, "")
