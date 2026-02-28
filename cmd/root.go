@@ -37,11 +37,10 @@ func helpText() string {
 	// Usage
 	b.WriteString(bold.Render("  USAGE") + "\n")
 	b.WriteString(dim.Render("  ─────────────────────────────────────────────") + "\n")
-	b.WriteString(fmt.Sprintf("    %s                             %s\n", cyan.Render("cat data.json | jsawn"), dim.Render("pipe from stdin")))
-	b.WriteString(fmt.Sprintf("    %s               %s\n", cyan.Render("curl -s <url> | jsawn"), dim.Render("pipe from a command")))
 	b.WriteString(fmt.Sprintf("    %s                          %s\n", cyan.Render("jsawn data.json"), dim.Render("open a local file")))
 	b.WriteString(fmt.Sprintf("    %s                %s\n", cyan.Render("jsawn <url>"), dim.Render("fetch JSON from a URL")))
 	b.WriteString(fmt.Sprintf("    %s   %s\n", cyan.Render("jsawn a.json,b.json,<url>"), dim.Render("multiple sources as tabs")))
+	b.WriteString(fmt.Sprintf("    %s                             %s\n", cyan.Render("cat data.json | jsawn"), dim.Render("pipe from stdin")))
 	b.WriteString("\n")
 
 	// Flags
@@ -49,18 +48,22 @@ func helpText() string {
 	b.WriteString(dim.Render("  ─────────────────────────────────────────────") + "\n")
 	b.WriteString(fmt.Sprintf("    %s       %s\n", cyan.Render("-H 'Key: Value'"), dim.Render("add HTTP header (repeatable)")))
 	b.WriteString(fmt.Sprintf("    %s           %s\n", cyan.Render("-X METHOD"), dim.Render("HTTP method (default: GET)")))
-	b.WriteString(fmt.Sprintf("    %s         %s\n", cyan.Render("-d '{...}'"), dim.Render("request body (auto sets Content-Type: application/json)")))
+	b.WriteString(fmt.Sprintf("    %s         %s\n", cyan.Render("-d '{...}'"), dim.Render("request body (auto-sets Content-Type: application/json)")))
 	b.WriteString("\n")
 
-	// HTTP examples
+	// Examples
 	b.WriteString(bold.Render("  EXAMPLES") + "\n")
 	b.WriteString(dim.Render("  ─────────────────────────────────────────────") + "\n")
-	b.WriteString(fmt.Sprintf("    %s\n", dim.Render("GET with auth header")))
-	b.WriteString(fmt.Sprintf("    %s\n\n", cyan.Render("jsawn -H 'Authorization: Bearer token' https://api.example.com/users")))
-	b.WriteString(fmt.Sprintf("    %s\n", dim.Render("POST with JSON body")))
-	b.WriteString(fmt.Sprintf("    %s\n\n", cyan.Render("jsawn -X POST -d '{\"name\":\"foo\"}' https://api.example.com/users")))
-	b.WriteString(fmt.Sprintf("    %s\n", dim.Render("multiple headers")))
-	b.WriteString(fmt.Sprintf("    %s\n", cyan.Render("jsawn -H 'Authorization: Bearer token' -H 'Accept: application/json' https://api.example.com")))
+	b.WriteString(fmt.Sprintf("    %s\n", dim.Render("explore a local file")))
+	b.WriteString(fmt.Sprintf("    %s\n\n", cyan.Render("jsawn package.json")))
+	b.WriteString(fmt.Sprintf("    %s\n", dim.Render("pipe from any command")))
+	b.WriteString(fmt.Sprintf("    %s\n\n", cyan.Render("kubectl get pods -o json | jsawn")))
+	b.WriteString(fmt.Sprintf("    %s\n", dim.Render("fetch an API with auth")))
+	b.WriteString(fmt.Sprintf("    %s\n\n", cyan.Render("jsawn -H 'Authorization: Bearer token' https://api.github.com/user")))
+	b.WriteString(fmt.Sprintf("    %s\n", dim.Render("POST and inspect the response")))
+	b.WriteString(fmt.Sprintf("    %s\n\n", cyan.Render("jsawn -X POST -d '{\"query\":\"users\"}' https://api.example.com/graphql")))
+	b.WriteString(fmt.Sprintf("    %s\n", dim.Render("compare local and remote JSON")))
+	b.WriteString(fmt.Sprintf("    %s\n", cyan.Render("jsawn config.json,https://api.example.com/config")))
 	b.WriteString("\n")
 
 	// Navigation

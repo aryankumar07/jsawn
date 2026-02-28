@@ -33,27 +33,35 @@ Download the latest binary from [GitHub Releases](https://github.com/aryankumar0
 
 ## Usage
 
-### Pipe from stdin
-
 ```bash
-cat data.json | jsawn
-curl -s https://api.example.com/users | jsawn
-echo '{"name": "jsawn"}' | jsawn
+cat data.json | jsawn              # pipe from stdin
+jsawn data.json                    # open a local file
+jsawn https://api.example.com/users  # fetch JSON from a URL
+jsawn a.json,b.json,<url>         # multiple sources as tabs
 ```
 
-### Open a file
+### HTTP Options
+
+When fetching from URLs, you can customize the request:
 
 ```bash
-jsawn data.json
+# Custom headers
+jsawn -H 'Authorization: Bearer <token>' https://api.example.com/users
+
+# POST with JSON body (auto-sets Content-Type: application/json)
+jsawn -X POST -d '{"name":"foo"}' https://api.example.com/users
+
+# Multiple headers
+jsawn -H 'Authorization: Bearer <token>' -H 'Accept: application/json' https://api.example.com/users
 ```
 
-### Fetch from a URL
+| Flag | Description |
+|---|---|
+| `-H 'Key: Value'` | Add an HTTP header (repeatable) |
+| `-X METHOD` | HTTP method (default: `GET`) |
+| `-d '{...}'` | Request body (auto-sets `Content-Type: application/json`) |
 
-```bash
-jsawn https://api.example.com/users
-```
-
-### Multiple sources
+### Multiple Sources
 
 Comma-separate files and URLs to open them as tabs:
 
@@ -62,6 +70,28 @@ jsawn users.json,https://api.example.com/posts,config.json
 ```
 
 Each source gets its own tab with independent navigation and state. Switch between them with `Tab` / `Shift+Tab`.
+
+### Examples
+
+```bash
+# Explore a local JSON file
+jsawn package.json
+
+# Pipe output from any command
+curl -s https://jsonplaceholder.typicode.com/todos | jsawn
+docker inspect <container> | jsawn
+kubectl get pods -o json | jsawn
+aws s3api list-buckets | jsawn
+
+# Inspect an API response with auth
+jsawn -H 'Authorization: Bearer <token>' https://api.github.com/user
+
+# Compare local config with remote
+jsawn config.json,https://api.example.com/config
+
+# POST and view the response
+jsawn -X POST -d '{"query":"users"}' https://api.example.com/graphql
+```
 
 ## Keybindings
 
