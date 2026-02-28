@@ -8,34 +8,122 @@ import (
 	"io"
 	"log"
 	"os"
+	"strings"
 
 	"github.com/aryankumar07/jsawn/source"
 	"github.com/aryankumar07/jsawn/tree"
 	"github.com/aryankumar07/jsawn/viewPage"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/spf13/cobra"
 )
+
+var (
+	cyan    = lipgloss.NewStyle().Foreground(lipgloss.Color("6"))
+	green   = lipgloss.NewStyle().Foreground(lipgloss.Color("2"))
+	yellow  = lipgloss.NewStyle().Foreground(lipgloss.Color("3"))
+	magenta = lipgloss.NewStyle().Foreground(lipgloss.Color("5"))
+	bold    = lipgloss.NewStyle().Bold(true)
+	dim     = lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
+)
+
+func helpText() string {
+	var b strings.Builder
+
+	// Title
+	title := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("6")).Render("jsawn")
+	b.WriteString(fmt.Sprintf("\n  %s — interactive JSON viewer for the terminal\n\n", title))
+
+	// Usage
+	b.WriteString(bold.Render("  USAGE") + "\n")
+	b.WriteString(dim.Render("  ─────────────────────────────────────────────") + "\n")
+	b.WriteString(fmt.Sprintf("    %s                             %s\n", cyan.Render("cat data.json | jsawn"), dim.Render("pipe from stdin")))
+	b.WriteString(fmt.Sprintf("    %s               %s\n", cyan.Render("curl -s <url> | jsawn"), dim.Render("pipe from a command")))
+	b.WriteString(fmt.Sprintf("    %s                          %s\n", cyan.Render("jsawn data.json"), dim.Render("open a local file")))
+	b.WriteString(fmt.Sprintf("    %s                %s\n", cyan.Render("jsawn <url>"), dim.Render("fetch JSON from a URL")))
+	b.WriteString(fmt.Sprintf("    %s   %s\n", cyan.Render("jsawn a.json,b.json,<url>"), dim.Render("multiple sources as tabs")))
+	b.WriteString("\n")
+
+	// Navigation
+	b.WriteString(bold.Render("  NAVIGATION") + "\n")
+	b.WriteString(dim.Render("  ─────────────────────────────────────────────") + "\n")
+	writeKey(&b, "j / ↓", "move down")
+	writeKey(&b, "k / ↑", "move up")
+	writeKey(&b, "h / ←", "collapse node / go to parent")
+	writeKey(&b, "l / →", "expand node / enter first child")
+	writeKey(&b, "space", "toggle collapse/expand")
+	writeKey(&b, "gg", "jump to top")
+	writeKey(&b, "G", "jump to bottom")
+	b.WriteString("\n")
+
+	// Folding
+	b.WriteString(bold.Render("  FOLDING") + "\n")
+	b.WriteString(dim.Render("  ─────────────────────────────────────────────") + "\n")
+	writeKey(&b, "e", "expand all")
+	writeKey(&b, "E", "collapse all")
+	writeKey(&b, "1-9", "fold to depth N")
+	b.WriteString("\n")
+
+	// Search
+	b.WriteString(bold.Render("  SEARCH") + "\n")
+	b.WriteString(dim.Render("  ─────────────────────────────────────────────") + "\n")
+	writeKey(&b, "/", "start search")
+	writeKey(&b, "enter", "execute search")
+	writeKey(&b, "n / N", "next / previous match")
+	writeKey(&b, "esc", "clear search")
+	writeKey(&b, "ctrl+u", "clear search query")
+	b.WriteString("\n")
+
+	// Views & Commands
+	b.WriteString(bold.Render("  VIEWS & COMMANDS") + "\n")
+	b.WriteString(dim.Render("  ─────────────────────────────────────────────") + "\n")
+	writeKey(&b, "f", "toggle flat view (leaf paths)")
+	writeKey(&b, ":", "enter command mode")
+	writeKey(&b, "tab / shift+tab", "switch tabs (multi-source)")
+	b.WriteString("\n")
+
+	// Schema commands
+	b.WriteString(bold.Render("  COMMANDS") + "\n")
+	b.WriteString(dim.Render("  ─────────────────────────────────────────────") + "\n")
+	writeKey(&b, ":schema go", "generate Go struct")
+	writeKey(&b, ":schema ts", "generate TypeScript interface")
+	writeKey(&b, ":schema zod", "generate Zod schema")
+	b.WriteString("\n")
+
+	// Overlay
+	b.WriteString(bold.Render("  SCHEMA OVERLAY") + "\n")
+	b.WriteString(dim.Render("  ─────────────────────────────────────────────") + "\n")
+	writeKey(&b, "j / k", "scroll down / up")
+	writeKey(&b, "d / u", "page down / up")
+	writeKey(&b, "y", "copy to clipboard")
+	writeKey(&b, "q / esc", "close overlay")
+	b.WriteString("\n")
+
+	// Quit
+	writeKey(&b, "q / esc / ctrl+c", "quit")
+	b.WriteString("\n")
+
+	return b.String()
+}
+
+func writeKey(b *strings.Builder, key, desc string) {
+	b.WriteString(fmt.Sprintf("    %s %s\n",
+		green.Render(fmt.Sprintf("%-20s", key)),
+		dim.Render(desc),
+	))
+}
+
+func SetVersionInfo(version, commit, date string) {
+	rootCmd.Version = version
+	rootCmd.SetVersionTemplate(fmt.Sprintf("jsawn %s (commit: %s, built: %s)\n", version, commit, date))
+}
 
 var rootCmd = &cobra.Command{
 	Use:   "jsawn [sources]",
 	Short: "Interactive JSON viewer for the terminal",
-	Long: `jsawn is a fast, interactive JSON viewer for the terminal.
-
-Pipe JSON from stdin or pass a file path as an argument:
-  cat data.json | jsawn
-  curl https://api.example.com | jsawn
-  jsawn data.json
-
-Fetch JSON from a URL:
-  jsawn https://api.example.com/data
-
-View multiple sources (comma-separated):
-  jsawn file.json,https://api.com/data,other.json
-
-Navigate with vim-style keybindings, fold/expand nodes,
-and explore large JSON documents with ease.`,
-	Args: cobra.MaximumNArgs(1),
-	Run:  runJsonViewer,
+	Long:  helpText(),
+	Args:  cobra.MaximumNArgs(1),
+	Run:   runJsonViewer,
 }
 
 func runJsonViewer(cmd *cobra.Command, args []string) {
@@ -100,5 +188,9 @@ func Execute() {
 }
 
 func init() {
-	// write the flags for CLI here
+	rootCmd.SetHelpTemplate(`{{.Long}}{{if .HasAvailableFlags}}
+  FLAGS
+  ─────────────────────────────────────────────
+{{.Flags.FlagUsages}}{{end}}
+`)
 }
