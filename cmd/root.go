@@ -39,7 +39,7 @@ func helpText() string {
 	b.WriteString(dim.Render("  ─────────────────────────────────────────────") + "\n")
 	b.WriteString(fmt.Sprintf("    %s                          %s\n", cyan.Render("jsawn data.json"), dim.Render("open a local file")))
 	b.WriteString(fmt.Sprintf("    %s                %s\n", cyan.Render("jsawn <url>"), dim.Render("fetch JSON from a URL")))
-	b.WriteString(fmt.Sprintf("    %s   %s\n", cyan.Render("jsawn a.json,b.json,<url>"), dim.Render("multiple sources as tabs")))
+	b.WriteString(fmt.Sprintf("    %s   %s\n", cyan.Render("jsawn a.json b.json <url>"), dim.Render("multiple sources as tabs")))
 	b.WriteString(fmt.Sprintf("    %s                             %s\n", cyan.Render("cat data.json | jsawn"), dim.Render("pipe from stdin")))
 	b.WriteString("\n")
 
@@ -63,7 +63,7 @@ func helpText() string {
 	b.WriteString(fmt.Sprintf("    %s\n", dim.Render("POST and inspect the response")))
 	b.WriteString(fmt.Sprintf("    %s\n\n", cyan.Render("jsawn -X POST -d '{\"query\":\"users\"}' https://api.example.com/graphql")))
 	b.WriteString(fmt.Sprintf("    %s\n", dim.Render("compare local and remote JSON")))
-	b.WriteString(fmt.Sprintf("    %s\n", cyan.Render("jsawn config.json,https://api.example.com/config")))
+	b.WriteString(fmt.Sprintf("    %s\n", cyan.Render("jsawn config.json https://api.example.com/config")))
 	b.WriteString("\n")
 
 	// Navigation
@@ -144,7 +144,7 @@ var rootCmd = &cobra.Command{
 	Use:   "jsawn [sources]",
 	Short: "Interactive JSON viewer for the terminal",
 	Long:  helpText(),
-	Args:  cobra.MaximumNArgs(1),
+	Args:  cobra.ArbitraryArgs,
 	Run:   runJsonViewer,
 }
 
@@ -162,10 +162,7 @@ func runJsonViewer(cmd *cobra.Command, args []string) {
 		}
 	}
 
-	var arg string
-	if len(args) == 1 {
-		arg = args[0]
-	}
+	arg := strings.Join(args, ",")
 
 	headers, _ := cmd.Flags().GetStringArray("header")
 	method, _ := cmd.Flags().GetString("method")

@@ -37,7 +37,7 @@ Download the latest binary from [GitHub Releases](https://github.com/aryankumar0
 cat data.json | jsawn              # pipe from stdin
 jsawn data.json                    # open a local file
 jsawn https://api.example.com/users  # fetch JSON from a URL
-jsawn a.json,b.json,<url>         # multiple sources as tabs
+jsawn a.json b.json <url>         # multiple sources as tabs
 ```
 
 ### HTTP Options
@@ -63,9 +63,10 @@ jsawn -H 'Authorization: Bearer <token>' -H 'Accept: application/json' https://a
 
 ### Multiple Sources
 
-Comma-separate files and URLs to open them as tabs:
+Pass multiple files and URLs as separate arguments or comma-separated to open them as tabs:
 
 ```bash
+jsawn users.json https://api.example.com/posts config.json
 jsawn users.json,https://api.example.com/posts,config.json
 ```
 
@@ -87,7 +88,7 @@ aws s3api list-buckets | jsawn
 jsawn -H 'Authorization: Bearer <token>' https://api.github.com/user
 
 # Compare local config with remote
-jsawn config.json,https://api.example.com/config
+jsawn config.json https://api.example.com/config
 
 # POST and view the response
 jsawn -X POST -d '{"query":"users"}' https://api.example.com/graphql
